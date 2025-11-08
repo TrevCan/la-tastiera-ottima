@@ -1,0 +1,16 @@
+sys : <module 'sys' (built-in)> type: module
+cv2 : <module 'cv2' from '/home/human/software/live-ocr/.venv/lib/python3.13/site-packages/cv2/__init__.py'> type: module
+time : <module 'time' (built-in)> type: module
+VideoStream : <class 'VideoStream.VideoStream'> type: type
+OCR : <class 'OCR.OCR'> type: Singleton
+ModelVocabulary : <module 'ModelVocabulary' from '/home/human/software/live-ocr/ModelVocabulary.py'> type: module
+InkTracker : <class 'InkTracker.InkTracker'> type: Singleton
+subprocess : <module 'subprocess' from '/home/human/.local/share/uv/python/cpython-3.13.0-linux-x86_64-gnu/lib/python3.13/subprocess.py'> type: module
+Singleton : <class 'Singleton.Singleton'> type: type
+OpticalTracker : <class 'OpticalTracker.OpticalTracker'> type: Singleton
+get_variables_with_values : <function get_variables_with_values at 0x7f406ed94860> type: function
+Data : <class '__main__.Data'> type: Singleton
+d : <__main__.Data object at 0x7f3f12d09be0> type: Data
+simulate_keystroke_wayland : <function simulate_keystroke_wayland at 0x7f3f12ba9bc0> type: function
+rodent_handler : <function rodent_handler at 0x7f3f12ba9c60> type: function
+ocr_stream : <function ocr_stream at 0x7f3f12ba9d00> type: function
