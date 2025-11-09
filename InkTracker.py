@@ -163,7 +163,7 @@ class InkTracker(metaclass=Singleton):
             #print(f'{time.ctime(time.time())}' )
             if self.video_stream is not None:
 
-                frame = self.video_stream.frame
+                frame = self.video_stream.frame.copy()
 
                 self.previous_state = self.current_state
                 self.data_exporter["previous_state"] = self.data_exporter["current_state"]
