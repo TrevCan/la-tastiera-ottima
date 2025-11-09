@@ -4,7 +4,16 @@ from threading import Thread
 import numpy as np
 import cv2
 
-from ImageTransformer import ImageTransformer
+from ImageTransformer import ImageTransformer as img
+
+from round_if_in_range import round_if_in_range
+
+def inRange(n, lower_bound, upper_bound):
+
+    def up(n, min_add):
+        return int(n + copysign(min_add, n))
+    
+
 
 class OpticalTracker(metaclass=Singleton):
 
@@ -19,39 +28,92 @@ class OpticalTracker(metaclass=Singleton):
         self.previous_state = False
         self.current_state = False
         self.have_printed_character = False
-        self.red_high_hsv = np.array([23, 232, 232])
-        self.red_low_hsv = np.array([0, 199, 156])
 
         self.video_stream = None
 
         self.data_exporter = None
 
+        self.mask = None
+        self.corners = None
+
+        self.p0 = []
+
+        self.target_displacement = 0
+
+        # this should be based off a 
+        # percentage from the size of an inch in pixels
+        # or any other measure, really, just make it
+        # adjustable every time the program is ran.
+        self.delta_distance = 10
+
+#        self.shiTomasiCornerParams = dict(
+#            maxCorners = 10,
+#            qualityLevel = 0.30,
+#            minDistance = 20,
+#            blockSize = 7 )
+#
+#        self.lucasKanadeParams = dict(
+#            winSize = (15, 15),
+#            maxLevel = 2,
+#            criteria = (cv2.TERM_CRITERIA_EPS |
+#                cv2.TERM_CRITERIA_COUNT,
+#                10,
+#                0.03 ) )
+
         self.shiTomasiCornerParams = dict(
-            maxCorners = 5,
-            qualityLevel = 0.2,
-            minDistance = 60,
+            maxCorners = 100,
+            qualityLevel = 0.04,
+            minDistance = 12,
             blockSize = 7 )
 
         self.lucasKanadeParams = dict(
-            winSize = (15, 15),
-            maxLevel = 2,
+            winSize = (23, 23),
+            maxLevel = 3,
             criteria = (cv2.TERM_CRITERIA_EPS |
                 cv2.TERM_CRITERIA_COUNT,
                 10,
-                0.03 ) )
+                0.03 ),
+                minEigThreshold=1e-4 )
 
-        self.randomColors = np.random.randint(0, 255, (100, 3) )
+# Brave AI's recommendations for tracking a metal ruler with dominant X-motion and small Y-vibrations:
+#Shi-Tomasi Parameters
+#maxCorners=200 → Reduce to 50–100. A ruler has limited texture; too many points may include noise.
+#qualityLevel=0.01 → Increase to 0.02–0.05 to select only stronger corners.
+#minDistance=2 → Increase to 10–15 to avoid clustering on edges.
+#blockSize=7 → Good for a ruler’s sharp edges; keep it.
+#🌀 Lucas-Kanade Parameters
+#winSize=(15, 15) → Slightly small. Use (21, 21) or (25, 25) for better patch matching on structured surfaces.
+#maxLevel=5 → High. Use 2–3 unless motion is very fast. Higher levels add computation with diminishing returns.
+#criteria=(..., 10, 0.03) → Good. Ensures convergence without excessive iterations.
+#✅ Additional Tip
+#Add minEigThreshold=1e-4 to lucasKanadeParams to filter out poorly tracked points:
+#
+#lucasKanadeParams = dict(
+#    winSize=(21, 21),
+#    maxLevel=3,
+#    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03),
+#    minEigThreshold=1e-4  # Add this
+#)
+#
 
-        self.firstFrame = None
+        self.random_colors = np.random.randint(0, 255, (100, 3) )
 
-        self.frame_gray_previous = None
+        self.initial_frame = None
+
+        self.previous_frame_bn = None
         self.previous_corners = None
 
+
+
+        ### --Start-- Thread operation flags
+        ## Flags for
+        ## RESUME, PAUSE, and STOP
         self.__go_flag = threading.Event() # Create new flag 'Event'
         self.__go_flag.set() # set flag to True
 
         self.__is_running = threading.Event()
         self.__is_running.set()
+        ### --End-- Thread operation flags
 
     def set_video_stream(self, video_stream):
         """
@@ -60,6 +122,15 @@ class OpticalTracker(metaclass=Singleton):
         to retrieve the most recent frame.
         """
         self.video_stream = video_stream
+
+    def set_mask(self, mask):
+        self.mask = mask
+
+    def set_ppi(self, ppi):
+        self.ppi = ppi
+
+    def set_corners(self, corners):
+        self.corners = corners
 
     def set_start_x(self, x: int):
         self.start_x = x
@@ -81,16 +152,6 @@ class OpticalTracker(metaclass=Singleton):
 
     def get_roi(self):
         return (self.start_x, self.start_y, self.end_x, self.end_y)
-
-    def set_red_hsv_ranges(self, red_high_hsv: np.array, red_low_hsv: np.array):
-        self.red_high_hsv = red_high_hsv
-        self.red_low_hsv = red_low_hsv
-
-    def set_red_high_hsv(self, red_high_hsv: np.array):
-        self.red_high_hsv = red_high_hsv
-
-    def set_red_low_hsv(self, red_low_hsv: np.array):
-        self.red_low_hsv = red_low_hsv
 
     def get_current_state(self):
         """
@@ -184,58 +245,172 @@ class OpticalTracker(metaclass=Singleton):
             if self.video_stream is not None:
 
                 frame = self.video_stream.frame.copy()
-                frame = ImageTransformer.frame_crop_frame(frame, 200, 50, 600, 546)
+                # cropping is somewhat unnecessary
+                #frame = img.frame_crop_frame(frame, 200, 50, 600, 546)
 
                 # setup
-                if self.firstFrame is None:
-                    self.firstFrame = frame
-                    if self.firstFrame is None:
+                if self.initial_frame is None:
+                    self.initial_frame = frame
+                    if self.initial_frame is None:
                         print(f'OpticalTracker(): unreadable frame.')
                         continue
 
-                    self.frame_gray_previous = ImageTransformer.frame_bgr_to_gray(self.firstFrame)
-                    self.previous_corners = cv2.goodFeaturesToTrack( self.frame_gray_previous,
-                                                                mask=None,
+#                    if self.mask is not None:
+#                        print(f'self.mask is not None')
+
+                    self.previous_frame_bn = img.frame_bgr_to_gray(self.initial_frame)
+                    #print(f"previous_frame_bn.shape is {self.previous_frame_bn.shape}")
+                    self.previous_corners = cv2.goodFeaturesToTrack( self.previous_frame_bn,
+                                                                mask=self.mask,
                                                                 **self.shiTomasiCornerParams)
+
+                    print(f'OG: previous_corners:\n {self.previous_corners}')
+
                     
-                    # new_corners = cv2.selectROI(self.firstFrame) 
+                    # user user provided corners if available
+                    if self.corners is not None:
+                        if len(self.corners) > 0:
+                            # used to be this, but really depends on how
+                            # you are inputing your data, sometimes
+                            # you don't need the []
+                            # self.previous_corners = np.array([self.corners], dtype=np.float32)
+                            self.previous_corners = np.array(self.corners, dtype=np.float32)
+
+                    # initial position of [0] corner will be the trigger when [1] corner
+                    # hits this position.
+                    # this means that the carriage has moved 1 inch.
+                    # this should of course have correct gui implementation
+                    
+                    # print(f'previous_corners:\n {self.previous_corners}')
+                    
+                    # new_corners = cv2.selectROI(self.initial_frame) 
 
                     # previous_corners = np.array([[[new_corners[0], new_corners[1] ]]], dtype=np.float32)
+
+                    # self.target_displacement
+                    # self.delta_distance = 3 pixels
+                    # TODO make self.delta_distance editable by the GUI
                     
-                    mask = np.zeros_like(self.firstFrame)
+                    self.target_displacement = self.previous_corners[1]
+                    print(f'target_displacement: {self.target_displacement}')
+                    self.delta_distance = 5
+                    
+                    self.p0 = self.previous_corners
+
+
+                    # do not 'retrack' on same frame
                 
                 # end setup
                 
+                mask = np.zeros_like(self.initial_frame)
+
                 # main loop
                 
-                frame_gray_current = ImageTransformer.frame_bgr_to_gray(frame)
+                current_frame_bn = img.frame_bgr_to_gray(frame)
 
-                current_corners, found_status, _ = cv2.calcOpticalFlowPyrLK(
-                    self.frame_gray_previous, frame_gray_current, self.previous_corners, None,
+                current_corners, found_status, error = cv2.calcOpticalFlowPyrLK(
+                    self.previous_frame_bn, current_frame_bn, self.previous_corners, None,
                     **self.lucasKanadeParams)
+
+                p1 = current_corners
         
                 if current_corners is not None:
                     cornersMatchedCur = current_corners[found_status==1]
                     cornersMatchedPrev = self.previous_corners[found_status==1]
+
+                if found_status is None:
+                    found_status = []
+
+                if len(found_status) > 0:
+                    found_mask = found_status.astype(bool).flatten()
+                    self.p0 = self.p0[found_mask]
+
+                p1_found1 = cornersMatchedCur
+
+                
+                if self.p0 is not None:
+                    self.data_exporter["results"]["shape_p0"] = self.p0.shape
+                if p1 is not None:
+                    self.data_exporter["results"]["shape_p1"] = p1.shape
+                if p1_found1 is not None:
+                    self.data_exporter["results"]["shape_p1_n,2"] = p1_found1.shape
 
                 for i, (curCorner, prevCorner) in enumerate(zip(
                     cornersMatchedCur, cornersMatchedPrev)):
                     xCur, yCur = curCorner.ravel()
                     xPrev, yPrev = prevCorner.ravel()
 
-                    mask = cv2.line(mask, ( int(xCur), int(yCur) ),
-                    ( int(xPrev), int(yPrev) ), self.randomColors[1].tolist(), 2)
 
+#                    mask = cv2.line(mask, ( int(xCur), int(yCur) ),
+#                    ( int(xPrev), int(yPrev) ), self.random_colors[i].tolist(), 2)
+                    mask = mask
+
+                    # show circles escalonated
                     frame = cv2.circle(frame, (int(xCur), int(yCur)), 5,
-                        self.randomColors[i].tolist(), -1)
+                        self.random_colors[i].tolist(), -1)
                     
                     frame = cv2.add(frame, mask)
+
+
+                magnitude = 0 
+                mean_dx = 0
+                mean_dy = 0
+
+                if found_status is None or len(found_status) == 0 or np.sum(found_status) == 0:
+                    mean_dx = 0
+                    mean_dy = 0
+                else:
+                    p1_filtered = p1_found1
+
+                    p0_filtered = self.p0
+                    
+                    p1_squeezed = p1_filtered.reshape(-1, 2)
+                    p0_squeezed = p0_filtered.reshape(-1, 2)
+                    
+                    mean_dx = np.mean(p1_squeezed[:, 0] - p0_squeezed[:, 0])
+                    mean_dy = np.mean(p1_squeezed[:, 1] - p0_squeezed[:, 1])
+
+                ## TODO make function that can adjust the way the displacement x is measured,
+                ## TODO ADD cropbox at the start of OpticalTracker 
+                ## TODO when points start to diverge more than 70% off the center, get new points
+                ##      preferably in the center region.
+                ## having points being there floating will deteriorate the overall displacement
+                ## average
+                average_motion_vector = (mean_dx, mean_dy)
+                magnitude = np.linalg.norm(average_motion_vector)
+
+                self.data_exporter["results"]["average_displacement_magnitude"] = magnitude
+                self.data_exporter["results"]["average_displacement_x"] = mean_dx
+                #print(f"displacement x is : {mean_dx}")
+                self.data_exporter["results"]["average_displacement_y"] = mean_dy
+                pp_tenth_of_an_inch = self.ppi / 10
+
+                chars_moved = round_if_in_range(mean_dx/pp_tenth_of_an_inch, 0.09, 0.9)
+                print(f"PPI {self.ppi} / 10 = {pp_tenth_of_an_inch}, chars_moved = {chars_moved}")
+
+                self.data_exporter["results"]["average_displacement_x_rounded"] = round_if_in_range(mean_dx, 0.1, 0.9) 
+                self.data_exporter["results"]["average_displacement_y_rounded"] = round_if_in_range(mean_dy, 0.1, 0.9) 
+                self.data_exporter["results"]["chars_moved"] = chars_moved
+
+
                 
-                self.frame_gray_previous = frame_gray_current.copy()
+
+                if( magnitude <= self.delta_distance):
+                    self.data_exporter["current_status"] = "green"
+                else:
+                    self.data_exporter["current_status"] = "red"
+
+                
+                self.previous_frame_bn = current_frame_bn.copy()
                 self.previous_corners = cornersMatchedCur.reshape(-1, 1, 2)
 
-                self.data_exporter["frames"]["result"] = frame.copy()
+                #self.data_exporter["frames"]["result"] = frame.copy()
+                #self.data_exporter["frames"]["result"] = current_frame_bn.copy()
+                #self.data_exporter["frames"]["result"] = None
                  
+                self.data_exporter["frames"]["result"] = frame.copy()
+
+                #time.sleep(0.01)
 
                 
 
