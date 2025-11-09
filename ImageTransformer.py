@@ -93,3 +93,22 @@ class ImageTransformer():
         returns binary mask
         """
         return cv2.inRange(hsv_frame, low_hsv, high_hsv)
+
+    @staticmethod
+    def get_binary_mask_polygon(frame_shape, polygon_coordinates):
+        """
+        Returns mask with width and height based on @param frame_shape.
+        It will set every pixel value within the polygon to 255.
+        The polygon must be passed as an array of coordinates in
+        clockwise order or counter clockwise order as per cv2.fillPoly().
+        [ [x1, y1], [x2, y2], [x3, y3], [x4, y4] ]
+        """
+        if len(polygon_coordinates) < 3:
+            # this is NOT a polygon!
+            return None
+        mask = np.zeros(frame_shape, dtype=np.uint8)
+        vertices = np.array(polygon_coordinates, dtype=np.int32)
+
+        cv2.fillPoly(mask, [vertices], 255)
+
+        return mask
