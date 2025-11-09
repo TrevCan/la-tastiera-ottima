@@ -266,7 +266,7 @@ class OCR( metaclass=Singleton ):
             if self.debug:
                 print(f'Running loop {time.ctime(time.time())}')
             if self.video_stream is not None:
-                frame = self.video_stream.frame 
+                frame = self.video_stream.frame.copy()
 
                 if frame is None:
                     print(f"ocr() thread: frame is None. BAD :(")
@@ -288,24 +288,17 @@ class OCR( metaclass=Singleton ):
                 self.data_exporter["filtered_frames"]["0"] = frame.copy()
 
                 frame = ImageTransformer.frame_crop_frame(frame, self.start_x, self.start_y, end_x, end_y)
-                #cv2.imshow("f1", frame)
 
                 if (self.crop_width != self.default_width) or (self.crop_height != self.default_height):
                     frame = ImageTransformer.frame_resize(frame, 
                         (self.default_width, self.default_height) )
 
-                #cv2.imshow("f2", frame)
 
                 frame = ImageTransformer.frame_bgr_to_gray(frame)
-                #cv2.imshow("f3", frame)
                 frame = ImageTransformer.frame_gaussian_blur(frame)
-                #cv2.imshow("f4", frame)
                 frame = ImageTransformer.frame_threshold_binary(frame)
-                #cv2.imshow("f5", frame)
                 frame = ImageTransformer.frame_morph_open(frame)
-                #cv2.imshow("f6", frame)
                 frame = ImageTransformer.frame_morph_close(frame)
-                #cv2.imshow("f7", frame)
 
                 self.transformed_frame = frame
 
