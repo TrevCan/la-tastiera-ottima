@@ -1,6 +1,7 @@
 import sys
 import cv2
 import time
+import numpy as np
 
 import VideoStream
 from VideoStream import VideoStream
@@ -16,6 +17,12 @@ from Singleton import Singleton
 
 from OpticalTracker import OpticalTracker
 
+from ImageTransformer import ImageTransformer
+
+
+def safe_imshow(name, frame):
+    if frame is not None and hasattr(frame, 'shape') and frame.shape != (0,) and frame.size > 0:
+        cv2.imshow(name, frame)   
 
 def get_variables_with_values():
     tmp = globals().copy()
@@ -95,11 +102,47 @@ class Data( metaclass=Singleton ):
                 "0": [],
                 "result": []
             },
-
-            "new_corners": []
+            "results": {
+                "average_displacement_magnitude": 0,
+                "average_displacement_x": 0,
+                "average_displacement_x_rounded": 0,
+                "average_displacement_y": 0,
+                "average_displacement_y_rounded": 0,
+                "shape_p0": 0,
+                "shape_p1": 0,
+                "shape_p1_n,2": 0,
+                "chars_moved": 0
+            },
+            "new_corners": [],
+            "current_status": "black",
+            "user_parameters": {
+                "pixels_per_inch": -1
+            }
         }
+##    if d.optical_roi_set_inch_initiate:
+#        x, y, w, h = cv2.selectROI("select_inch", VideoStream().frame.copy(), showCrosshair=False, fromCenter=False)
+#        d.optical_data["user_parameters"]["pixels_per_inch"]=w
+#
+
+        self.optical_roi_set_inch_initiate = False
+
+        self.optical_roi_initiate = False
+        self.optical_roi_points = []
+        self.optical_roi_max_points = 4
+         
+        self.optical_roi_mask = None
+        self.optical_roi_mask_initiate = False
+        self.optical_roi_mask_points = []
+        self.optical_roi_mask_max_points = 4
 
         self.enable_model = False
+
+        self.status_frames = {
+            "green": np.full( (50, 50, 3), [0, 255, 0], dtype=np.uint8),
+            "red": np.full( (50, 50, 3), [0, 0, 255], dtype=np.uint8),
+            "black": np.full( (50, 50, 3), [0], dtype=np.uint8),
+            "blue": np.full( (50, 50, 3), [255, 0, 0], dtype=np.uint8)
+        }
 
 d = Data()
 
@@ -150,6 +193,31 @@ def rodent_handler(event, x, y, flags, param):
         InkTracker().set_end_x(x)
         InkTracker().set_end_y(y)
 
+    if d.optical_roi_initiate:
+        if len(d.optical_roi_points) <= d.optical_roi_max_points:
+            if event == cv2.EVENT_LBUTTONDOWN:    
+                
+                # this is for adding points as corners,
+                # NOT for setting a mask.
+                d.optical_roi_points.append([[x, y]])
+                print("Added current mouseX, mouseY to optical_roi_points")
+        else:
+            print(f"Points are: {d.optical_roi_points}")
+            d.optical_roi_initiate = False
+            print(f"ROI Mask creation for Optical Tracking.\n###END###")
+
+    if d.optical_roi_mask_initiate:
+        if len(d.optical_roi_mask_points) < d.optical_roi_mask_max_points:
+            if event == cv2.EVENT_LBUTTONDOWN:    
+                # this is for setting a mask!
+                d.optical_roi_mask_points.append([x, y])
+                
+        else:
+            print(f"Points are: {d.optical_roi_mask_points}")
+            d.optical_roi_mask_initiate = False
+            print(f"ROI Mask creation for Optical Tracking.\n###END###")
+
+
 #           Key Detector           
 # L_CLICK   Move ROI (ink) to mouse location.
 # M_CLICK   Move ROI (ink) corner to mouse location.
@@ -158,17 +226,23 @@ def rodent_handler(event, x, y, flags, param):
 
 def ocr_stream(source: int = 0):
 
-    d = Data()
+    # already in line above somewhere in the void
+    # maybe go watch True Detective S01
+    ##d = Data()
     ink = InkTracker()
     
+    # TODO make video_stream a singleton or make object available to rodent
+    # handler
     video_stream = VideoStream(source)
     video_stream.start() # starts new thread dedicated to getting the frame.
 
     o_tracker = OpticalTracker()
     o_tracker.set_video_stream(video_stream)
     o_tracker.set_data_exporter(d.optical_data)
-    o_tracker.start()
     o_tracker.pause()
+    o_tracker.start()
+    # don't actually run the thread, only initiate it
+    # resume with o_tracker.resume()
 
 
     ink.set_video_stream(video_stream)    
@@ -205,6 +279,8 @@ def ocr_stream(source: int = 0):
     cv2.setMouseCallback('stream', rodent_handler)
 
     cv2.namedWindow('output', flags=cv2.WINDOW_AUTOSIZE | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+
+    cv2.namedWindow('optical', flags=cv2.WINDOW_AUTOSIZE | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
 
 
     def graceful_exit():
@@ -389,23 +465,89 @@ def ocr_stream(source: int = 0):
                 file.write(get_variables_with_values())
             print(f"Wrote variables to {file_name}")
 
+        if pressed_key == ord('n'):
+            #d.optical_roi_mask = None
+            d.optical_roi_initiate = True
+            d.optical_roi_points = []
+            d.optical_roi_max_points = 4
+
+        if pressed_key == ord('m'):
+            d.optical_roi_mask = None
+            d.optical_roi_mask_initiate = True
+            d.optical_roi_mask_points = []
+            d.optical_roi_mask_max_points = 4
 
 
+#         
+#        self.optical_roi_mask = None
+#        self.optical_roi_mask_initiate = False
+#        self.optical_roi_mask_points = []
+#        self.optical_roi_mask_max_points = 4
+#
+            
         optical_tracker_frame = None
 
         if pressed_key == ord('u'):
+            #print(f"VS dimensions: {video_stream.get_video_dimensions()}")
+            # we only want a binary image, so only receive the first two elements.
+            shape = video_stream.shape()[:2]
+
+            o_tracker.set_ppi(d.optical_data["user_parameters"]["pixels_per_inch"])
+            o_tracker.set_corners(d.optical_roi_points)
+            
+            d.optical_roi_mask = ImageTransformer.get_binary_mask_polygon(
+                shape,
+                d.optical_roi_mask_points )
+            if d.optical_roi_mask is not None:
+                cv2.imshow('mask', d.optical_roi_mask)
+
+            o_tracker.set_mask(d.optical_roi_mask)
+
             if not o_tracker.is_running():
                 o_tracker.resume()
+                print(f">\tRESUME Optical Tracker")
+                time.sleep(0.01)
             else:
+                print(f"||\tPAUSE Optical Tracker")
                 o_tracker.pause()
-            optical_tracker_frame = d.optical_data["frames"]["result"]
+
+        if pressed_key==ord('l'):
+            print("Start Le Inch Calibrationnnn")
+            d.optical_roi_set_inch_initiate = True
+            if d.optical_roi_set_inch_initiate:
+                x, y, w, h = cv2.selectROI("select_inch", VideoStream().frame.copy(), showCrosshair=False, fromCenter=False)
+                d.optical_data["user_parameters"]["pixels_per_inch"]=w
+                print(f'PPI: {d.optical_data["user_parameters"]["pixels_per_inch"]}')
+                cv2.destroyWindow("select_inch") 
+                d.optical_roi_set_inch_initiate = False
+
+#         
+#        self.optical_roi_mask = None
+#        self.optical_roi_mask_initiate = False
+#        self.optical_roi_mask_points = []
+#        self.optical_roi_mask_max_points = 4
+#
+
+
+
 
         if o_tracker.is_running():
             optical_tracker_frame = d.optical_data["frames"]["result"]
             
-        if optical_tracker_frame is not None:
-            cv2.imshow("optical", optical_tracker_frame) 
-                
+#
+#        d_mag = d.optical_data["results"]["average_displacement_magnitude"]
+#        d_x = d.optical_data["results"]["average_displacement_y"]
+#        d_y = d.optical_data["results"]["average_displacement_x"]
+#
+#        cv2.displayStatusBar('optical', f'MAG {d_mag}. DISP X: {d_x}\tDISP Y: {d_y}', 0)
+        cv2.displayStatusBar("optical", f'charsM: {d.optical_data["results"]["chars_moved"]}')
+
+        #cv2.displayStatusBar('output', f'crop ({x}, {y}): ({w}, {h})', 0)
+#                 "results": {
+#                "average_displacement_magnitude": 0,
+#                "average_displacement_x": 0,
+#                "average_displacement_y": 0
+#            },           
 
         #out_frame = ocr.transformed_frame
         if out_frame is not None:
@@ -416,8 +558,15 @@ def ocr_stream(source: int = 0):
             # If the background thread hasn't provided a frame yet, wait briefly and try again
             time.sleep(0.01)
             continue
+
+        cv2.imshow("status optical", d.status_frames[d.optical_data["current_status"]])
         
         frame = video_stream.frame.copy()  # Grabs the most recent frame read by the VideoStream class
+
+
+#        if optical_tracker_frame is not None:
+#            cv2.imshow("optical", optical_tracker_frame) 
+        safe_imshow("optical", optical_tracker_frame)
 
         d.ocr_roi["ex"] = d.ocr_roi["x"] + d.ocr_roi["w"]
         d.ocr_roi["ey"] = d.ocr_roi["y"] + d.ocr_roi["h"]
@@ -427,8 +576,6 @@ def ocr_stream(source: int = 0):
         sx, sy, ex, ey = ink.get_roi()
 
         cv2.rectangle(frame, (sx, sy), (ex, ey), (0, 0, 255), thickness=2)
-
-
 
         cv2.imshow("stream", frame)
 
