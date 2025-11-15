@@ -8,12 +8,6 @@ from ImageTransformer import ImageTransformer as img
 
 from round_if_in_range import round_if_in_range
 
-def inRange(n, lower_bound, upper_bound):
-
-    def up(n, min_add):
-        return int(n + copysign(min_add, n))
-    
-
 
 class OpticalTracker(metaclass=Singleton):
 
@@ -39,6 +33,9 @@ class OpticalTracker(metaclass=Singleton):
         self.p0 = []
 
         self.target_displacement = 0
+
+
+        self.ppi = -1
 
         # this should be based off a 
         # percentage from the size of an inch in pixels
@@ -184,7 +181,7 @@ class OpticalTracker(metaclass=Singleton):
         It will return False if it is paused or permanently
             stopped or exited.
         """
-        return self.__is_running.isSet() & self.__go_flag.isSet()
+        return self.__is_running.is_set() & self.__go_flag.is_set()
 
     def pause(self):
         """
@@ -228,14 +225,17 @@ class OpticalTracker(metaclass=Singleton):
         self.data_exporter = data_exporter
 
     def new_data_exporter(self):
-        return 
+        return
+
+    def create_new_corners(self):
+        self.initial_frame = None
 
     def OpticalTracker(self):
         """
         InkTracker Processing loop. Runs in separate thread.
         Start thread using start()
         """
-        while self.__is_running.isSet():
+        while self.__is_running.is_set():
             self.__go_flag.wait() # If __go_flag is False it will not run
                                     # until set to True, therefore 'pausing'
                                     # the thread.
@@ -245,8 +245,12 @@ class OpticalTracker(metaclass=Singleton):
             if self.video_stream is not None:
 
                 frame = self.video_stream.frame.copy()
-                # cropping is somewhat unnecessary
-                #frame = img.frame_crop_frame(frame, 200, 50, 600, 546)
+
+                x1, y1, x2, y2 = self.data_exporter["crop_points"]
+                # cropping is somewhat unnecessary OR NOT....
+                frame = img.frame_crop_frame(frame, x1, y1, x2, y2)
+
+                self.data_exporter["frames"]["cropped_frame"] = frame.copy()
 
                 # setup
                 if self.initial_frame is None:
@@ -259,7 +263,8 @@ class OpticalTracker(metaclass=Singleton):
 #                        print(f'self.mask is not None')
 
                     self.previous_frame_bn = img.frame_bgr_to_gray(self.initial_frame)
-                    #print(f"previous_frame_bn.shape is {self.previous_frame_bn.shape}")
+                    print(f"previous_frame_bn.shape is {self.previous_frame_bn.shape}")
+                    print(f"mask.shape is {self.mask.shape}")
                     self.previous_corners = cv2.goodFeaturesToTrack( self.previous_frame_bn,
                                                                 mask=self.mask,
                                                                 **self.shiTomasiCornerParams)
@@ -267,7 +272,7 @@ class OpticalTracker(metaclass=Singleton):
                     print(f'OG: previous_corners:\n {self.previous_corners}')
 
                     
-                    # user user provided corners if available
+                    # user provided corners if available
                     if self.corners is not None:
                         if len(self.corners) > 0:
                             # used to be this, but really depends on how
@@ -367,7 +372,13 @@ class OpticalTracker(metaclass=Singleton):
                     p1_squeezed = p1_filtered.reshape(-1, 2)
                     p0_squeezed = p0_filtered.reshape(-1, 2)
                     
-                    mean_dx = np.mean(p1_squeezed[:, 0] - p0_squeezed[:, 0])
+                    #mean_dx = np.mean(p1_squeezed[:, 0] - p0_squeezed[:, 0])
+                    #mean_dy = np.mean(p1_squeezed[:, 1] - p0_squeezed[:, 1])
+
+
+                    # On a typewriter, the carriage moves to the left whenever
+                    # you type a character, therefore we must invert the difference
+                    mean_dx = np.mean(p0_squeezed[:, 0] - p1_squeezed[:, 0])
                     mean_dy = np.mean(p1_squeezed[:, 1] - p0_squeezed[:, 1])
 
                 ## TODO make function that can adjust the way the displacement x is measured,
@@ -383,6 +394,7 @@ class OpticalTracker(metaclass=Singleton):
                 self.data_exporter["results"]["average_displacement_x"] = mean_dx
                 #print(f"displacement x is : {mean_dx}")
                 self.data_exporter["results"]["average_displacement_y"] = mean_dy
+                self.ppi = self.data_exporter["user_parameters"]["pixels_per_inch"]
                 pp_tenth_of_an_inch = self.ppi / 10
 
                 chars_moved = round_if_in_range(mean_dx/pp_tenth_of_an_inch, 0.09, 0.9)
