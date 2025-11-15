@@ -19,6 +19,7 @@ class VideoStream (metaclass=Singleton):
         @param src. Mandatory parameter for the video source index
                     as an integer.
         """
+        self.src = src
         print(f'Starting video stream on source: {src}')
         self.stream = cv2.VideoCapture(src)
         
@@ -80,7 +81,7 @@ class VideoStream (metaclass=Singleton):
         It will return False if it is paused or permanently
             stopped or exited.
         """
-        return self.__is_running.isSet() & self.__go_flag.isSet()
+        return self.__is_running.is_set() & self.__go_flag.is_set()
 
     def pause(self):
         """
@@ -118,11 +119,14 @@ class VideoStream (metaclass=Singleton):
 
         print(f'\nGoodbye from {self.__class__.__name__}!')
 
+    def __str__(self):
+        return f"src = {self.src}"
+
     def get(self):
         """
         Continuously gets frames from CV2 VideoCapture and sets them as self.frame attribute
         """
-        while self.__is_running.isSet():
+        while self.__is_running.is_set():
             self.__go_flag.wait() # If __go_flag is False it will not run
                                     # until set to True, therefore 'pausing'
                                     # the thread.
