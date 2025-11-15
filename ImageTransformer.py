@@ -4,7 +4,7 @@ import typing
 from typing import Optional
 from typing import Tuple
 
-class ImageTransformer():
+class ImageTransformer:
     @staticmethod
     def frame_resize(frame, dimensions: Tuple[int, int]):
         """
@@ -20,7 +20,53 @@ class ImageTransformer():
         Crops frame to coordinate rectangle.
         """
         return frame[ starty:endy, startx:endx ]
-    
+
+    @staticmethod
+    def frame_bgr_to_rgba(frame):
+        """
+        Converts BGR frame to RGBA (Red, Green, Blue, Alpha)
+        uses opencv's cv2.cvtColor
+        Returns RGBA frame
+        """
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
+        return frame
+
+    @staticmethod
+    def frame_gray_to_rgba(frame):
+        """
+        Converts Gray (binary) frame to RGBA (Red, Green, Blue, Alpha)
+        uses opencv's cv2.cvtColor
+        Returns RGBA frame
+        """
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGBA)
+        return frame
+
+    @staticmethod
+    def frame_bgr_to_rgba_normalized(frame):
+        """
+        Converts BGR frame into a normalized (0 to 1 float)
+        RGBA frame.
+        This is useful for rendering it in DearPyGUI
+        """
+        video_texture = ImageTransformer.frame_bgr_to_rgba(frame)
+        video_texture = video_texture.ravel()
+        video_texture = np.asarray(video_texture, dtype=np.float32)
+        video_texture = np.true_divide(video_texture, 255.0)
+        return video_texture
+
+    @staticmethod
+    def frame_gray_to_rgba_normalized(frame):
+        """
+        Converts Gray (binary) frame into a normalized (0 to 1 float)
+        RGBA frame.
+        This is useful for rendering it in DearPyGUI
+        """
+        video_texture = ImageTransformer.frame_gray_to_rgba(frame)
+        video_texture = video_texture.ravel()
+        video_texture = np.asarray(video_texture, dtype=np.float32)
+        video_texture = np.true_divide(video_texture, 255.0)
+        return video_texture
+
     @staticmethod
     def frame_bgr_to_gray(frame):
         """
@@ -87,9 +133,9 @@ class ImageTransformer():
 
 
     @staticmethod
-    def inRange(hsv_frame, low_hsv, high_hsv):
+    def in_range_hsv(hsv_frame, low_hsv, high_hsv):
         """
-        cv2.inRange(hsv_frame, low_hsv, high_hsv)
+        cv2.in_range(hsv_frame, low_hsv, high_hsv)
         returns binary mask
         """
         return cv2.inRange(hsv_frame, low_hsv, high_hsv)
