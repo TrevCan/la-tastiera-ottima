@@ -103,7 +103,7 @@ class InkTracker(metaclass=Singleton):
         It will return False if it is paused or permanently
             stopped or exited.
         """
-        return self.__is_running.isSet() & self.__go_flag.isSet()
+        return self.__is_running.is_set() & self.__go_flag.is_set()
 
     def pause(self):
         """
@@ -154,7 +154,7 @@ class InkTracker(metaclass=Singleton):
         InkTracker Processing loop. Runs in separate thread.
         Start thread using start()
         """
-        while self.__is_running.isSet():
+        while self.__is_running.is_set():
             self.__go_flag.wait() # If __go_flag is False it will not run
                                     # until set to True, therefore 'pausing'
                                     # the thread.
@@ -186,7 +186,7 @@ class InkTracker(metaclass=Singleton):
                 hsv_frame = ImageTransformer.frame_bgr_to_hsv(cropped_frame)
                 
                 #mask = cv2.inRange(hsv_frame, self.red_low_hsv, self.red_high_hsv)
-                mask = ImageTransformer.inRange(hsv_frame, self.red_low_hsv, self.red_high_hsv)
+                mask = ImageTransformer.in_range_hsv(hsv_frame, self.red_low_hsv, self.red_high_hsv)
                 
                 # make rectangle around red color
                 contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
