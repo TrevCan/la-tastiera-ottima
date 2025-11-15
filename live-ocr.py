@@ -19,7 +19,6 @@ from OpticalTracker import OpticalTracker
 
 from ImageTransformer import ImageTransformer
 
-
 def safe_imshow(name, frame):
     if frame is not None and hasattr(frame, 'shape') and frame.shape != (0,) and frame.size > 0:
         cv2.imshow(name, frame)   
@@ -98,7 +97,12 @@ class Data( metaclass=Singleton ):
         }
         
         self.optical_data = {
+            # defines the crop area that will
+            # always be read and applied before processing
+            # the image in OpticalTracker.py
+            "crop_points": (-1, -1, -1, -1),
             "frames": {
+                "cropped_frame": None,
                 "0": [],
                 "result": []
             },
@@ -119,12 +123,32 @@ class Data( metaclass=Singleton ):
                 "pixels_per_inch": -1
             }
         }
+
+        self.commander = {
+            "frame": None,
+            "checkbox_01": {
+                "name": "",
+                "state": [ False ]
+            },
+            "checkbox_02": {
+                "name": "",
+                "state": [ False ]
+            },
+            "button_optical_set_crop_region": {
+                "name": "Set rectangle to new Optical Crop Region",
+                "state": False
+            },
+            "button_optical_set_crop_roi": {
+                "name": "Set rectangle to ROI point tracker region",
+                "state": False
+            }
+        }
+
+
 ##    if d.optical_roi_set_inch_initiate:
 #        x, y, w, h = cv2.selectROI("select_inch", VideoStream().frame.copy(), showCrosshair=False, fromCenter=False)
 #        d.optical_data["user_parameters"]["pixels_per_inch"]=w
 #
-
-        self.optical_roi_set_inch_initiate = False
 
         self.optical_roi_initiate = False
         self.optical_roi_points = []
@@ -202,7 +226,15 @@ def rodent_handler(event, x, y, flags, param):
                 d.optical_roi_points.append([[x, y]])
                 print("Added current mouseX, mouseY to optical_roi_points")
         else:
-            print(f"Points are: {d.optical_roi_points}")
+            x, y, w, h = d.optical_data["crop_points"]
+
+            shape = (h, w)
+
+            for i, _ in enumerate(d.optical_roi_mask_points):
+                d.optical_roi_mask_points[i][0] -= x
+                d.optical_roi_mask_points[i][1] -= y
+
+            print(f"Points are: {d.optical_roi_points} (Relative to crop box.)")
             d.optical_roi_initiate = False
             print(f"ROI Mask creation for Optical Tracking.\n###END###")
 
@@ -241,6 +273,9 @@ def ocr_stream(source: int = 0):
     o_tracker.set_data_exporter(d.optical_data)
     o_tracker.pause()
     o_tracker.start()
+    width, height = video_stream.get_video_dimensions()
+    # default crop box should be nothing
+    d.optical_data["crop_points"] = (0, 0, width, height)
     # don't actually run the thread, only initiate it
     # resume with o_tracker.resume()
 
@@ -281,6 +316,7 @@ def ocr_stream(source: int = 0):
     cv2.namedWindow('output', flags=cv2.WINDOW_AUTOSIZE | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
 
     cv2.namedWindow('optical', flags=cv2.WINDOW_AUTOSIZE | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+
 
 
     def graceful_exit():
@@ -406,7 +442,7 @@ def ocr_stream(source: int = 0):
                 ocr.resume()
                 print(f"OCR >")
             else:
-                print('ERROR: Unable to resume or pause OCR', file=stderr)
+                print('ERROR: Unable to resume or pause OCR', file=sys.stderr)
 
 
 
@@ -490,16 +526,21 @@ def ocr_stream(source: int = 0):
         if pressed_key == ord('u'):
             #print(f"VS dimensions: {video_stream.get_video_dimensions()}")
             # we only want a binary image, so only receive the first two elements.
-            shape = video_stream.shape()[:2]
 
-            o_tracker.set_ppi(d.optical_data["user_parameters"]["pixels_per_inch"])
+
             o_tracker.set_corners(d.optical_roi_points)
-            
+
+            x, y, w, h = d.optical_data["crop_points"]
+
+            shape = (h, w)
+
             d.optical_roi_mask = ImageTransformer.get_binary_mask_polygon(
                 shape,
                 d.optical_roi_mask_points )
             if d.optical_roi_mask is not None:
                 cv2.imshow('mask', d.optical_roi_mask)
+
+            o_tracker.set_mask(d.optical_roi_mask)
 
             o_tracker.set_mask(d.optical_roi_mask)
 
@@ -512,14 +553,32 @@ def ocr_stream(source: int = 0):
                 o_tracker.pause()
 
         if pressed_key==ord('l'):
-            print("Start Le Inch Calibrationnnn")
-            d.optical_roi_set_inch_initiate = True
-            if d.optical_roi_set_inch_initiate:
-                x, y, w, h = cv2.selectROI("select_inch", VideoStream().frame.copy(), showCrosshair=False, fromCenter=False)
-                d.optical_data["user_parameters"]["pixels_per_inch"]=w
-                print(f'PPI: {d.optical_data["user_parameters"]["pixels_per_inch"]}')
-                cv2.destroyWindow("select_inch") 
-                d.optical_roi_set_inch_initiate = False
+            was_running = False
+            if o_tracker.is_running():
+                o_tracker.pause()
+                was_running = True
+
+            print('start Le Cropbox Calibration')
+            x, y, w, h = cv2.selectROI("Select Cropbox Optical Tracking", video_stream.frame.copy(), showCrosshair=True, fromCenter=False)
+            d.optical_data["crop_points"] = (x, y, x+w, y+h)
+            cv2.destroyWindow("Select Cropbox Optical Tracking")
+
+            print("Start Le Inch Calibration")
+            frame = video_stream.frame.copy()
+
+            x1, y1, x2, y2 = d.optical_data["crop_points"]
+
+            frame = ImageTransformer.frame_crop_frame(frame, x1, y1, x2, y2)
+
+            x, y, w, h = cv2.selectROI("select_inch", frame, showCrosshair=False, fromCenter=False)
+            d.optical_data["user_parameters"]["pixels_per_inch"]=w
+            print(f'PPI: {d.optical_data["user_parameters"]["pixels_per_inch"]}')
+            cv2.destroyWindow("select_inch")
+
+            o_tracker.create_new_corners()
+
+            if was_running:
+                o_tracker.resume()
 
 #         
 #        self.optical_roi_mask = None
@@ -578,6 +637,7 @@ def ocr_stream(source: int = 0):
         cv2.rectangle(frame, (sx, sy), (ex, ey), (0, 0, 255), thickness=2)
 
         cv2.imshow("stream", frame)
+
 
 if __name__ == "__main__":
     # If using a specific camera index (e.g., /dev/videoN), change '0' to '1' or the correct index.
