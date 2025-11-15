@@ -154,7 +154,7 @@ class OCR( metaclass=Singleton ):
         It will return False if it is paused or permanently
             stopped or exited.
         """
-        return self.__is_running.isSet() & self.__go_flag.isSet()
+        return self.__is_running.is_set() & self.__go_flag.is_set()
 
     def pause(self):
         """
@@ -259,13 +259,13 @@ class OCR( metaclass=Singleton ):
         OCR Processing loop. Runs in separate thread.
         Start thread using start()
         """
-        while self.__is_running.isSet():
+        while self.__is_running.is_set():
             self.__go_flag.wait() # If __go_flag is False it will not run
                                     # until set to True, therefore 'pausing'
                                     # the thread.
             if self.debug:
                 print(f'Running loop {time.ctime(time.time())}')
-            if self.video_stream is not None:
+            if self.video_stream.grabbed:
                 frame = self.video_stream.frame.copy()
 
                 if frame is None:
