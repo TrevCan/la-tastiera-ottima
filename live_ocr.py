@@ -19,6 +19,19 @@ from OpticalTracker import OpticalTracker
 
 from ImageTransformer import ImageTransformer
 
+from gui import GUI
+
+import dearpygui.dearpygui as dpg
+
+from Data import Data
+
+def isKeyDown(key):
+    """
+    isKeyDown(key)
+    key must be format dpg.mvKey_.*
+    """
+    return dpg.is_key_down(key)
+
 def safe_imshow(name, frame):
     if frame is not None and hasattr(frame, 'shape') and frame.shape != (0,) and frame.size > 0:
         cv2.imshow(name, frame)   
@@ -33,140 +46,6 @@ def get_variables_with_values():
             ## to print important variables!!!
     return data
 
-class Data( metaclass=Singleton ):
-    """
-    Stores data. Allows for cross-function
-    transfer without the need of using 'global'
-    variables. Instead, this class is a Singleton
-    OOP-based class. It will always return the
-    same instance of the class no matter what.
-    Of course, the first time it is called the
-    instance is created.
-    """
-    def __init__(self):
-        self.mouse_x = 0
-        self.mouse_y = 0
-        self.ocr_roi = {
-            "x": 475,
-            "y": 191,
-            "ex": 509,
-            "ey": 250,
-            "w": 34,
-            "h": 59,
-            "amplification": 0.35417
-        }
-        
-        self.ink_roi = {
-            "x": 594,
-            "y": 285,
-            "ex": 611,
-            "ey": 293
-        }
-        
-        self.ocr_data = {
-            "filtered_frames": {
-            "0": [],
-            "1": [],
-            "2": [],
-            "3": [],
-            "4": [],
-            "5": [],
-            "6": [],
-            "7": [],
-            "8": []
-            },
-            "parameters": {
-                "a": []
-            }
-        }
-
-        self.ink_data = {
-            "filtered_frames": {
-            "0": [],
-            "1": [],
-            "2": [],
-            "3": [],
-            "4": [],
-            "5": [],
-            "6": [],
-            "7": [],
-            "8": []
-            },
-            "current_state": False,
-            "previous_state": False
-        }
-        
-        self.optical_data = {
-            # defines the crop area that will
-            # always be read and applied before processing
-            # the image in OpticalTracker.py
-            "crop_points": (-1, -1, -1, -1),
-            "frames": {
-                "cropped_frame": None,
-                "0": [],
-                "result": []
-            },
-            "results": {
-                "average_displacement_magnitude": 0,
-                "average_displacement_x": 0,
-                "average_displacement_x_rounded": 0,
-                "average_displacement_y": 0,
-                "average_displacement_y_rounded": 0,
-                "shape_p0": 0,
-                "shape_p1": 0,
-                "shape_p1_n,2": 0,
-                "chars_moved": 0
-            },
-            "new_corners": [],
-            "current_status": "black",
-            "user_parameters": {
-                "pixels_per_inch": -1
-            }
-        }
-
-        self.commander = {
-            "frame": None,
-            "checkbox_01": {
-                "name": "",
-                "state": [ False ]
-            },
-            "checkbox_02": {
-                "name": "",
-                "state": [ False ]
-            },
-            "button_optical_set_crop_region": {
-                "name": "Set rectangle to new Optical Crop Region",
-                "state": False
-            },
-            "button_optical_set_crop_roi": {
-                "name": "Set rectangle to ROI point tracker region",
-                "state": False
-            }
-        }
-
-
-##    if d.optical_roi_set_inch_initiate:
-#        x, y, w, h = cv2.selectROI("select_inch", VideoStream().frame.copy(), showCrosshair=False, fromCenter=False)
-#        d.optical_data["user_parameters"]["pixels_per_inch"]=w
-#
-
-        self.optical_roi_initiate = False
-        self.optical_roi_points = []
-        self.optical_roi_max_points = 4
-         
-        self.optical_roi_mask = None
-        self.optical_roi_mask_initiate = False
-        self.optical_roi_mask_points = []
-        self.optical_roi_mask_max_points = 4
-
-        self.enable_model = False
-
-        self.status_frames = {
-            "green": np.full( (50, 50, 3), [0, 255, 0], dtype=np.uint8),
-            "red": np.full( (50, 50, 3), [0, 0, 255], dtype=np.uint8),
-            "black": np.full( (50, 50, 3), [0], dtype=np.uint8),
-            "blue": np.full( (50, 50, 3), [255, 0, 0], dtype=np.uint8)
-        }
 
 d = Data()
 
@@ -178,7 +57,9 @@ def simulate_keystroke_wayland(character):
     # ydotool uses a specific keycode or character mapping
     # Note: This requires the 'ydotoold' daemon to be running.
 
-    print(f'CHAR IS: {character}')
+    if d.debug["all"] or d.debug["simulate_keystroke_wayland"]:
+        print(f'CHAR IS: {character}')
+
     character = ModelVocabulary.vocabulary_to_char[character]
     
     if len(character) == 1:
@@ -194,60 +75,67 @@ def simulate_keystroke_wayland(character):
     try:
         # Execute the command
         subprocess.run(command, check=True)
-        print(f"Simulated keypress via ydotool: {character}")
+        if d.debug["all"] or d.debug["simulate_keystroke_wayland"]:
+            print(f"Simulated keypress via ydotool: {character}")
     except subprocess.CalledProcessError as e:
         print(f"ydotool failed: {e}")
         print("Ensure the ydotool daemon (ydotoold) is running and accessible.")
         return
 
-def rodent_handler(event, x, y, flags, param):
-    d.mouse_x = x
-    d.mouse_y = y
+def rodent_handler(sender, app_data, user_data):
+    d.mouse_x = app_data[0] + GUI().d.regionCreator.draw_offset_x
+    d.mouse_y = app_data[1] + GUI().d.regionCreator.draw_offset_y
     
-    if event == cv2.EVENT_LBUTTONDOWN:
-        sx, sy, ex, ey = InkTracker().get_roi()
-        dx = ex - sx
-        dy = ey - sy
-        InkTracker().set_start_x(x)
-        InkTracker().set_start_y(y)
-        InkTracker().set_end_x(x + dx)
-        InkTracker().set_end_y(y + dy)
-        
-    if event == cv2.EVENT_MBUTTONDOWN:
-        InkTracker().set_end_x(x)
-        InkTracker().set_end_y(y)
-
-    if d.optical_roi_initiate:
-        if len(d.optical_roi_points) <= d.optical_roi_max_points:
-            if event == cv2.EVENT_LBUTTONDOWN:    
-                
-                # this is for adding points as corners,
-                # NOT for setting a mask.
-                d.optical_roi_points.append([[x, y]])
-                print("Added current mouseX, mouseY to optical_roi_points")
-        else:
-            x, y, w, h = d.optical_data["crop_points"]
-
-            shape = (h, w)
-
-            for i, _ in enumerate(d.optical_roi_mask_points):
-                d.optical_roi_mask_points[i][0] -= x
-                d.optical_roi_mask_points[i][1] -= y
-
-            print(f"Points are: {d.optical_roi_points} (Relative to crop box.)")
-            d.optical_roi_initiate = False
-            print(f"ROI Mask creation for Optical Tracking.\n###END###")
-
-    if d.optical_roi_mask_initiate:
-        if len(d.optical_roi_mask_points) < d.optical_roi_mask_max_points:
-            if event == cv2.EVENT_LBUTTONDOWN:    
-                # this is for setting a mask!
-                d.optical_roi_mask_points.append([x, y])
-                
-        else:
-            print(f"Points are: {d.optical_roi_mask_points}")
-            d.optical_roi_mask_initiate = False
-            print(f"ROI Mask creation for Optical Tracking.\n###END###")
+#    if event == cv2.EVENT_LBUTTONDOWN:
+#        sx, sy, ex, ey = InkTracker().get_roi()
+#        dx = ex - sx
+#        dy = ey - sy
+#        InkTracker().set_start_x(x)
+#        InkTracker().set_start_y(y)
+#        InkTracker().set_end_x(x + dx)
+#        InkTracker().set_end_y(y + dy)
+#
+#    if event == cv2.EVENT_MBUTTONDOWN:
+#        InkTracker().set_end_x(x)
+#        InkTracker().set_end_y(y)
+#
+#    if d.optical_roi_initiate:
+#        if len(d.optical_roi_points) <= d.optical_roi_max_points:
+#            if event == cv2.EVENT_LBUTTONDOWN:
+#
+#                # this is for adding points as corners,
+#                # NOT for setting a mask.
+#                d.optical_roi_points.append([[x, y]])
+#                if d.debug["all"] or d.debug["rodent_handler_optical_roi_initiate"]:
+#                    print("Added current mouseX, mouseY to optical_roi_points")
+#        else:
+#            x, y, w, h = d.optical_data["crop_points"]
+#
+#            shape = (h, w)
+#
+#            for i, _ in enumerate(d.optical_roi_mask_points):
+#                d.optical_roi_mask_points[i][0] -= x
+#                d.optical_roi_mask_points[i][1] -= y
+#
+#            if d.debug["all"] or d.debug["rodent_handler_optical_roi_initiate"]:
+#                print(f"Points are: {d.optical_roi_points} (Relative to crop box.)")
+#            d.optical_roi_initiate = False
+#
+#            if d.debug["all"] or d.debug["rodent_handler_optical_roi_initiate"]:
+#                print(f"ROI Mask creation for Optical Tracking.\n###END###")
+#
+#    if d.optical_roi_mask_initiate:
+#        if len(d.optical_roi_mask_points) < d.optical_roi_mask_max_points:
+#            if event == cv2.EVENT_LBUTTONDOWN:
+#                # this is for setting a mask!
+#                d.optical_roi_mask_points.append([x, y])
+#
+#        else:
+#            if d.debug["all"] or d.debug["rodent_handler_optical_roi_mask_initiate"]:
+#                print(f"Points are: {d.optical_roi_mask_points}")
+#
+#                print(f"ROI Mask creation for Optical Tracking.\n###END###")
+#            d.optical_roi_mask_initiate = False
 
 
 #           Key Detector           
@@ -257,6 +145,7 @@ def rodent_handler(event, x, y, flags, param):
 
 
 def ocr_stream(source: int = 0):
+
 
     # already in line above somewhere in the void
     # maybe go watch True Detective S01
@@ -279,8 +168,9 @@ def ocr_stream(source: int = 0):
     # don't actually run the thread, only initiate it
     # resume with o_tracker.resume()
 
+    gui = GUI(width, height)
 
-    ink.set_video_stream(video_stream)    
+    ink.set_video_stream(video_stream)
     ink.set_roi(d.ink_roi["x"], d.ink_roi["y"], d.ink_roi["ex"], d.ink_roi["ey"])
     ink.set_data_exporter(d.ink_data)
     ink.start()
@@ -298,9 +188,13 @@ def ocr_stream(source: int = 0):
 
 
     dims = ocr.get_default_dimensions()
-    print(f"default\n{dims}")
+    if d.debug["all"] or d.debug["ocr_stream_dimensions"]:
+        print(f"default\n{dims}")
     dims = ocr.get_crop_dimensions()
-    print(f"crop\n{dims}")
+
+    if d.debug["all"] or d.debug["ocr_stream_roi_or_crop_dimensions"]:
+        print(f"crop\n{dims}")
+
     d.ocr_roi["w"] = dims[0] 
     d.ocr_roi["h"] = dims[1] 
 
@@ -311,16 +205,16 @@ def ocr_stream(source: int = 0):
         
     cv2.namedWindow('stream', flags=cv2.WINDOW_AUTOSIZE | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
     #cv2.namedWindow('stream')
-    cv2.setMouseCallback('stream', rodent_handler)
+    #cv2.setMouseCallback('stream', rodent_handler)
 
     cv2.namedWindow('output', flags=cv2.WINDOW_AUTOSIZE | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
 
     cv2.namedWindow('optical', flags=cv2.WINDOW_AUTOSIZE | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
 
 
-
     def graceful_exit():
         print("\nUser requested exit.")
+        gui.exit()
         ocr.exit()
         ink.exit()
         o_tracker.exit()
@@ -335,13 +229,23 @@ def ocr_stream(source: int = 0):
     ocr.set_crop_dimensions(d.ocr_roi['w'], d.ocr_roi['h'])
     ocr.set_crop_location(d.ocr_roi['x'], d.ocr_roi['y'])
 
+    with dpg.handler_registry():
+        dpg.add_mouse_move_handler(
+            callback=rodent_handler,
+        )
 
-    while True:
+    with dpg.texture_registry():
+        z = np.zeros((700, 700, 4), dtype=np.float32 )
+        dpg.add_raw_texture(tag="texture_cropped_optical_tag", width=700, height=700, format=dpg.mvFormat_Float_rgba, default_value=z)
+
+    with dpg.window(label="CROP", tag="cropped_optical_window", pos=(800, 300)):
+        dpg.draw_image(tag="draw_ttt", texture_tag="texture_cropped_optical_tag", pmin=[0,0], pmax=[700,700])
+        #dpg.add_image(texture_tag="texture_cropped_optical_tag", width=300, height=300)
+
+
+    while gui.loop_condition():
 
         
-        raw_key = cv2.waitKey(1)
-        pressed_key = raw_key & 0xFF
-
 #           KEYSSSS
 #
 # v         turn ON/off Live OCR Keyboard
@@ -375,24 +279,39 @@ def ocr_stream(source: int = 0):
 # q         Exit
 
 
-        if pressed_key == ord('q'):
+        #if pressed_key == ord('q'):
+        if isKeyDown(dpg.mvKey_Q):
             graceful_exit()
 
+#        # wasd control ROI COR
+#        if pressed_key == ord('w'):
+#            d.ocr_roi["y"] -= 1
+#        if pressed_key == ord('a'):
+#            d.ocr_roi["x"] -= 1
+#        if pressed_key == ord('s'):
+#            d.ocr_roi["y"] += 1
+#        if pressed_key == ord('d'):
+#            d.ocr_roi["x"] += 1
+
         # wasd control ROI COR
-        if pressed_key == ord('w'):
+        if isKeyDown(dpg.mvKey_W):
             d.ocr_roi["y"] -= 1
-        if pressed_key == ord('a'):
+        if isKeyDown(dpg.mvKey_A):
             d.ocr_roi["x"] -= 1
-        if pressed_key == ord('s'):
+        if isKeyDown(dpg.mvKey_S):
             d.ocr_roi["y"] += 1
-        if pressed_key == ord('d'):
+        if isKeyDown(dpg.mvKey_D):
             d.ocr_roi["x"] += 1
 
-        if pressed_key == ord(' '):
+
+
+        #if pressed_key == ord(' '):
+        if isKeyDown(dpg.mvKey_Spacebar):
             d.ocr_roi['x'] = round(d.mouse_x - d.ocr_roi['w']/2)
             d.ocr_roi['y'] = round(d.mouse_y - d.ocr_roi['h']/2)
 
-        if pressed_key == ord('9'):
+        #if pressed_key == ord('9'):
+        if isKeyDown(dpg.mvKey_9):
             f = 1
             d.ocr_roi['amplification'] -= 0.02
 
@@ -407,7 +326,8 @@ def ocr_stream(source: int = 0):
             d.ocr_roi['x'] -= round(f * deltax/2)
             d.ocr_roi['y'] -= round(f * deltay/2)
 
-        if pressed_key == ord('0'):
+        #if pressed_key == ord('0'):
+        if isKeyDown(dpg.mvKey_0):
             f = 1
             d.ocr_roi['amplification'] += 0.02
 
@@ -434,7 +354,8 @@ def ocr_stream(source: int = 0):
 #        if pressed_key == ord('1'):
 #            simulate_keystroke_wayland('q')
 
-        if pressed_key == ord('p'):
+        #if pressed_key == ord('p'):
+        if isKeyDown(dpg.mvKey_P):
             if ocr.is_running():
                 ocr.pause()
                 print(f"OCR ||")
@@ -446,7 +367,8 @@ def ocr_stream(source: int = 0):
 
 
 
-        if pressed_key == ord('v'):
+        #if pressed_key == ord('v'):
+        if isKeyDown(dpg.mvKey_V):
             d.enable_model = not d.enable_model
             print(f"OCR Model: {d.enable_model}")
 
@@ -469,7 +391,8 @@ def ocr_stream(source: int = 0):
             ink.pause()
 
 
-        if pressed_key == ord('f'):
+        #if pressed_key == ord('f'):
+        if isKeyDown(dpg.mvKey_F):
             x, y = ocr.set_crop_location(d.ocr_roi['x'], d.ocr_roi['y'])
             w, h = ocr.get_crop_dimensions()
             if not ocr.is_running():
@@ -479,11 +402,15 @@ def ocr_stream(source: int = 0):
             character, confidence = ocr.get_latest_prediction()
             #character, confidence = ocr.predict_single_character(out_frame)
             print(f'Char is {character} with {confidence} confidence.')
-            cv2.displayStatusBar('output', f'crop ({x}, {y}): ({w}, {h})', 0)
+#            cv2.displayStatusBar('output', f'crop ({x}, {y}): ({w}, {h})', 0)
 
-            cv2.imshow("f0", d.ocr_data["filtered_frames"]["0"])
+#            cv2.imshow("f0", d.ocr_data["filtered_frames"]["0"])
+            # TODO add window for filtered frame in dearpygui
 
-        if pressed_key == ord('x'):
+            dpg.set_value("log_text", f'Char is {character} with {confidence} confidence.')
+
+        #if pressed_key == ord('x'):
+        if isKeyDown(dpg.mvKey_X):
             d.ocr_roi['x'] = round(d.mouse_x - d.ocr_roi['w']/2)
             d.ocr_roi['y'] = round(d.mouse_y - d.ocr_roi['h']/2)
 
@@ -495,19 +422,22 @@ def ocr_stream(source: int = 0):
 
             cv2.displayStatusBar('output', f'crop ({x}, {y}): ({w}, {h})', 0)
 
-        if pressed_key == ord('k'):
+        #if pressed_key == ord('k'):
+        if isKeyDown(dpg.mvKey_K):
             file_name = f"data_{time.ctime(time.time())}.txt"
             with open(file_name, "w") as file:
                 file.write(get_variables_with_values())
             print(f"Wrote variables to {file_name}")
 
-        if pressed_key == ord('n'):
+        #if pressed_key == ord('n'):
+        if isKeyDown(dpg.mvKey_N):
             #d.optical_roi_mask = None
             d.optical_roi_initiate = True
             d.optical_roi_points = []
             d.optical_roi_max_points = 4
 
-        if pressed_key == ord('m'):
+        #if pressed_key == ord('m'):
+        if isKeyDown(dpg.mvKey_M):
             d.optical_roi_mask = None
             d.optical_roi_mask_initiate = True
             d.optical_roi_mask_points = []
@@ -523,7 +453,8 @@ def ocr_stream(source: int = 0):
             
         optical_tracker_frame = None
 
-        if pressed_key == ord('u'):
+        #if pressed_key == ord('u'):
+        if isKeyDown(dpg.mvKey_U):
             #print(f"VS dimensions: {video_stream.get_video_dimensions()}")
             # we only want a binary image, so only receive the first two elements.
 
@@ -539,6 +470,7 @@ def ocr_stream(source: int = 0):
                 d.optical_roi_mask_points )
             if d.optical_roi_mask is not None:
                 cv2.imshow('mask', d.optical_roi_mask)
+                # TODO maybe remove this....
 
             o_tracker.set_mask(d.optical_roi_mask)
 
@@ -552,7 +484,8 @@ def ocr_stream(source: int = 0):
                 print(f"||\tPAUSE Optical Tracker")
                 o_tracker.pause()
 
-        if pressed_key==ord('l'):
+        #if pressed_key==ord('l'):
+        if isKeyDown(dpg.mvKey_L):
             was_running = False
             if o_tracker.is_running():
                 o_tracker.pause()
@@ -611,6 +544,7 @@ def ocr_stream(source: int = 0):
         #out_frame = ocr.transformed_frame
         if out_frame is not None:
             cv2.imshow("output", out_frame)
+            # TODO maybe remove this too.
             
 
         if video_stream.frame is None:
@@ -618,29 +552,44 @@ def ocr_stream(source: int = 0):
             time.sleep(0.01)
             continue
 
-        cv2.imshow("status optical", d.status_frames[d.optical_data["current_status"]])
+#        cv2.imshow("status optical", d.status_frames[d.optical_data["current_status"]])
+        # TODO add this to info window, maybe as colored text.
         
         frame = video_stream.frame.copy()  # Grabs the most recent frame read by the VideoStream class
 
 
-#        if optical_tracker_frame is not None:
+        if optical_tracker_frame is not None:
+            f = ImageTransformer.frame_bgr_to_rgba(frame)
+            f_centered = ImageTransformer.center_image_in_texture(f, target_width=width, target_height=height)  # Assuming 200x200 texture
+            gui.update_optical_stream_frame(f_centered)
+    ## TODO make this work!!! add button to enable optical tracking.
+
 #            cv2.imshow("optical", optical_tracker_frame) 
-        safe_imshow("optical", optical_tracker_frame)
+        #safe_imshow("optical", optical_tracker_frame)
+        # TODO add optical window
+
 
         d.ocr_roi["ex"] = d.ocr_roi["x"] + d.ocr_roi["w"]
         d.ocr_roi["ey"] = d.ocr_roi["y"] + d.ocr_roi["h"]
 
+
+        gui.update_raw_stream_frame(frame)
 
         cv2.rectangle(frame, (d.ocr_roi["x"], d.ocr_roi["y"]), ( d.ocr_roi["ex"], d.ocr_roi["ey"]), (0, 255, 0), thickness=2)
         sx, sy, ex, ey = ink.get_roi()
 
         cv2.rectangle(frame, (sx, sy), (ex, ey), (0, 0, 255), thickness=2)
 
-        cv2.imshow("stream", frame)
+        gui.update_roi_stream_frame(frame)
+
+        gui.loop()
+
+    graceful_exit()
+
 
 
 if __name__ == "__main__":
     # If using a specific camera index (e.g., /dev/videoN), change '0' to '1' or the correct index.
     # The default 0 is usually the first webcam.
     #ocr_stream(source=0, _ink_roi_x=594, _ink_roi_y=285, _ink_roi_end_x=611, _ink_roi_end_y=293 ) 
-    ocr_stream(source=0)
+    ocr_stream(source="/dev/video1")
