@@ -158,3 +158,37 @@ class ImageTransformer:
         cv2.fillPoly(mask, [vertices], 255)
 
         return mask
+
+
+    @staticmethod
+    def center_image_in_texture(frame, target_width, target_height):
+        """
+        Creates a frame of width target_width and height target_height.
+        Centers `frame`. (Must be of equal or smaller width and height).
+        The rest will be black.
+
+        Args:
+            frame: Input image.
+            target_width: desired width of the frame
+            target_height: desired height of the frame
+
+        Returns:
+            Padded image of width target_width, height target_height.
+            The channel format is returned as in frame.
+        """
+        h, w = frame.shape[:2]
+        pad_top = (target_height - h) // 2
+        pad_left = (target_width - w) // 2
+        pad_bottom = target_height - h - pad_top
+        pad_right = target_width - w - pad_left
+
+        # Pad with black (0s)
+        padded = cv2.copyMakeBorder(
+            frame,
+            pad_top, pad_bottom, pad_left, pad_right,
+            cv2.BORDER_CONSTANT,
+            value=[0, 0, 0, 0]  # Black for RGBA
+        )
+        return padded
+
+
